@@ -6,4 +6,8 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi[standard]>=0.139.0",
+    "httpx>=0.28.1",
 ]
+
+[tool.fastapi]
+entrypoint = "weeks.week_01.main:app"
