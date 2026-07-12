@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "7432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  payment-api:
+    build: ./mock_apis/payment
+    ports:
+      - "9001:9001"
+
+  protection-api:
+    build: ./mock_apis/protection
+    ports:
+      - "9002:9002"
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      payment-api:
+        condition: service_started
+      protection-api:
+        condition: service_started
+
+volumes:
+  postgres_data:
