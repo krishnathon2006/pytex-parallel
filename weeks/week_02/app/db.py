@@ -1,5 +1,13 @@
-from sqlalchemy.ext.asyncio import create_async_engine
+from collections.abc import AsyncIterator
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import DATABASE_URL
+from app.infra.postgres.postgres import PostgresClient
 
-engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
+postgres = PostgresClient(DATABASE_URL)
+
+
+async def get_session() -> AsyncIterator[AsyncSession]:
+    async with postgres.session() as session:
+        yield session
