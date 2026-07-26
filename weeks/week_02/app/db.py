@@ -1,5 +1,4 @@
-from sqlalchemy.ext.asyncio import create_async_engine
-
 from app.config import DATABASE_URL
+from app.infra.postgres.postgres import PostgresClient
 
-engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
+postgres = PostgresClient(DATABASE_URL)

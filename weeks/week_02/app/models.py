@@ -1,7 +1,8 @@
 import enum
-from datetime import datetime, timezone
+from datetime import datetime
 
-from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -38,7 +39,9 @@ class Seat(Base):
 
     __tablename__ = "seats"
     __table_args__ = (
-        UniqueConstraint("location_id", "sector", "row", "number", name="uq_seat_position"),
+        UniqueConstraint(
+            "location_id", "sector", "row", "number", name="uq_seat_position"
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -52,7 +55,7 @@ class Seat(Base):
 
 class Event(Base):
     """Мероприятие с датой, площадкой и базовой ценой. Создается организатором.
-        Например: Концерт Аллы Пугачевой, Мастер-класс по Python."""
+    Например: Концерт Аллы Пугачевой, Мастер-класс по Python."""
 
     __tablename__ = "events"
 
@@ -62,7 +65,7 @@ class Event(Base):
     title: Mapped[str]
     description: Mapped[str | None]
     category: Mapped[str]
-    starts_at: Mapped[datetime] = mapped_column(DateTime(), index=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     base_price: Mapped[int]
 
 
@@ -84,16 +87,16 @@ class Booking(Base):
         server_default=BookingStatus.pending_payment.value,
         index=True,
     )
-    reserved_until: Mapped[datetime] = mapped_column(DateTime(), index=True)
+    reserved_until: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
 
 
 class EventSeat(Base):
     """Место конкретного мероприятия с ценой и статусом."""
 
     __tablename__ = "event_seats"
-    __table_args__ = (
-        UniqueConstraint("event_id", "seat_id", name="uq_event_seat"),
-    )
+    __table_args__ = (UniqueConstraint("event_id", "seat_id", name="uq_event_seat"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), index=True)
@@ -105,7 +108,7 @@ class EventSeat(Base):
         server_default=SeatStatus.available.value,
         index=True,
     )
-    reserved_until: Mapped[datetime | None] = mapped_column(DateTime())
+    reserved_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     booking_id: Mapped[int | None] = mapped_column(
         ForeignKey("bookings.id"),
         index=True,
