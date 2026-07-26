@@ -20,19 +20,33 @@ services:
     ports:
       - "9002:9002"
 
-  app:
-    build: .
+  redis:
+    image: redis:7-alpine
     ports:
-      - "8000:8000"
-    volumes:
-      - .:/app
-    depends_on:
-      db:
-        condition: service_healthy
-      payment-api:
-        condition: service_started
-      protection-api:
-        condition: service_started
+      - "7379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # app запускаем локально: сначала `uv run alembic upgrade head`
+  # потом `uv run uvicorn app.main:app --reload`
+  #  app:
+  #    build: .
+  #    ports:
+  #      - "8000:8000"
+  #    volumes:
+  #      - .:/app
+  #    depends_on:
+  #      db:
+  #        condition: service_healthy
+  #      payment-api:
+  #        condition: service_started
+  #      protection-api:
+  #        condition: service_started
+  #      redis:
+  #        condition: service_healthy
 
 volumes:
   postgres_data:

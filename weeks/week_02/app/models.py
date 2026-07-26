@@ -69,6 +69,15 @@ class Event(Base):
     base_price: Mapped[int]
 
 
+class EventView(Base):
+    """Количество просмотров мероприятия."""
+
+    __tablename__ = "event_views"
+
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), primary_key=True)
+    views_count: Mapped[int] = mapped_column(default=0, server_default="0")
+
+
 class Booking(Base):
     """Бронь пользователя на выбранные места."""
 
