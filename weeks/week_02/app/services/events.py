@@ -1,14 +1,12 @@
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.infra.postgres.postgres import PostgresClient
+from app.infra.postgres.repositories.events import EventRepository
 from app.models import Event
 
 
 class EventService:
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
+    def __init__(self, postgres: PostgresClient) -> None:
+        self._postgres = postgres
 
     async def list_events(self) -> list[Event]:
-        result = await self._session.scalars(select(Event).order_by(Event.starts_at))
-
-        return list(result.all())
+        async with self._postgres.session() as session:
+            return await EventRepository(session).list_ordered_by_start()

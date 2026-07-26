@@ -3,8 +3,6 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, update
-
 from app.config import BOOKING_TTL_MINUTES
 from app.exceptions import (
     DuplicateSeatError,
@@ -15,7 +13,11 @@ from app.exceptions import (
 from app.infra.clients.payment import PaymentClient
 from app.infra.clients.protection import ProtectionClient
 from app.infra.postgres.postgres import PostgresClient
-from app.models import Booking, BookingStatus, Event, EventSeat, Seat, SeatStatus
+from app.infra.postgres.repositories.bookings import BookingRepository
+from app.infra.postgres.repositories.event_seats import EventSeatRepository
+from app.infra.postgres.repositories.events import EventRepository
+from app.infra.postgres.repositories.seats import SeatRepository
+from app.models import Booking, BookingStatus, Event, SeatStatus
 from app.schemas import PaymentQuote, ProtectionQuote
 from app.utils import row_label
 
@@ -49,19 +51,15 @@ class CheckoutService:
             raise DuplicateSeatError("Seats must be unique")
 
         async with self._postgres.transaction() as session:
-            event = await session.get(Event, event_id)
+            event = await EventRepository(session).get(event_id)
             if event is None:
                 raise EventNotFoundError
 
-            statement = (
-                select(EventSeat)
-                .where(EventSeat.event_id == event_id, EventSeat.seat_id.in_(seat_ids))
-                .order_by(EventSeat.id)
-                .with_for_update()
+            # Seats are locked in ascending id order, so two concurrent checkouts
+            # over overlapping seats can never deadlock against each other.
+            event_seats = await EventSeatRepository(session).lock_for_update(
+                event_id, seat_ids
             )
-
-            result = await session.scalars(statement)
-            event_seats = list(result.all())
 
             if len(event_seats) != len(seat_ids):
                 raise SeatsNotFoundError("Seats not found")
@@ -102,17 +100,14 @@ class CheckoutService:
                 reserved_until=reserved_until,
             )
 
-            session.add(booking)
-
-            await session.flush()
+            await BookingRepository(session).add(booking)
 
             for event_seat in event_seats:
                 event_seat.booking_id = booking.id
                 event_seat.status = SeatStatus.reserved
                 event_seat.reserved_until = reserved_until
 
-            seat_rows = await session.scalars(select(Seat).where(Seat.id.in_(seat_ids)))
-            seats_by_id = {seat.id: seat for seat in seat_rows}
+            seats_by_id = await SeatRepository(session).map_by_ids(seat_ids)
 
             seat_details: list[dict[str, int | str]] = []
             for event_seat in event_seats:
@@ -143,21 +138,17 @@ class CheckoutService:
                 protection_task, booking.id
             )
 
+            protection_price = (
+                protection_quote.price
+                if protection_quote and protection_quote.available
+                else None
+            )
+
             async with self._postgres.transaction() as session:
-                values: dict[str, int] = {
-                    "payment_commission": payment_quote.commission
-                }
-                if protection_quote and protection_quote.available:
-                    values["protection_price"] = protection_quote.price
-                update_result = await session.execute(
-                    update(Booking)
-                    .where(
-                        Booking.id == booking.id,
-                        Booking.status == BookingStatus.pending_payment,
-                    )
-                    .values(**values)
+                updated_rows = await BookingRepository(session).apply_quotes(
+                    booking.id, payment_quote.commission, protection_price
                 )
-                if update_result.rowcount == 0:
+                if updated_rows == 0:
                     raise SeatsUnavailableError("Reservation expired during checkout")
         except Exception:
             logger.warning(
@@ -189,28 +180,13 @@ class CheckoutService:
 
     async def _release_booking(self, booking_id: int) -> None:
         async with self._postgres.transaction() as session:
-            await session.execute(
-                update(Booking)
-                .where(Booking.id == booking_id)
-                .values(status=BookingStatus.cancelled)
-            )
+            await BookingRepository(session).mark_cancelled(booking_id)
+
             # Lock seats in the same ascending-id order as the reservation query,
             # otherwise this bulk release can deadlock with a concurrent checkout.
-            locked_seat_ids = list(
-                await session.scalars(
-                    select(EventSeat.id)
-                    .where(EventSeat.booking_id == booking_id)
-                    .order_by(EventSeat.id)
-                    .with_for_update()
-                )
+            event_seat_repository = EventSeatRepository(session)
+            locked_seat_ids = await event_seat_repository.lock_ids_for_booking(
+                booking_id
             )
             if locked_seat_ids:
-                await session.execute(
-                    update(EventSeat)
-                    .where(EventSeat.id.in_(locked_seat_ids))
-                    .values(
-                        status=SeatStatus.available,
-                        reserved_until=None,
-                        booking_id=None,
-                    )
-                )
+                await event_seat_repository.release(locked_seat_ids)

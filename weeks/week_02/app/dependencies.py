@@ -1,18 +1,15 @@
 from typing import Annotated
 
 from fastapi import Depends, Request
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_session, postgres
+from app.db import postgres
 from app.services.checkout import CheckoutService
 from app.services.dashboard import DashboardService
 from app.services.events import EventService
 
-DatabaseSession = Annotated[AsyncSession, Depends(get_session)]
 
-
-def get_event_service(session: DatabaseSession) -> EventService:
-    return EventService(session)
+def get_event_service() -> EventService:
+    return EventService(postgres)
 
 
 EventServiceDep = Annotated[EventService, Depends(get_event_service)]

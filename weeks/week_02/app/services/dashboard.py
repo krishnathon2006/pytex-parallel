@@ -1,11 +1,11 @@
 import asyncio
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, func, select
-
 from app.exceptions import AccessDeniedError, EventNotFoundError
 from app.infra.postgres.postgres import PostgresClient
-from app.models import Booking, BookingStatus, Event, EventSeat, SeatStatus
+from app.infra.postgres.repositories.bookings import BookingRepository
+from app.infra.postgres.repositories.event_seats import EventSeatRepository
+from app.infra.postgres.repositories.events import EventRepository
 from app.schemas import EventDashboard, OccupancyDashboard, SalesDashboard
 
 
@@ -17,7 +17,7 @@ class DashboardService:
         self, event_id: int, organizer_id: int
     ) -> EventDashboard:
         async with self._postgres.session() as session:
-            event = await session.get(Event, event_id)
+            event = await EventRepository(session).get(event_id)
 
         if event is None:
             raise EventNotFoundError
@@ -38,55 +38,25 @@ class DashboardService:
 
     async def _load_sales(self, event_id: int) -> SalesDashboard:
         async with self._postgres.session() as session:
-            paid_orders, revenue = (
-                await session.execute(
-                    select(
-                        func.count(),
-                        func.coalesce(func.sum(Booking.amount), 0),
-                    )
-                    .select_from(Booking)
-                    .where(
-                        Booking.event_id == event_id,
-                        Booking.status == BookingStatus.paid,
-                    )
-                )
-            ).one()
-
-            sold_tickets = await session.scalar(
-                select(func.count())
-                .select_from(EventSeat)
-                .where(
-                    EventSeat.event_id == event_id,
-                    EventSeat.status == SeatStatus.sold,
-                )
+            paid_orders, revenue = await BookingRepository(session).sales_totals(
+                event_id
             )
+            sold_tickets = await EventSeatRepository(session).count_sold(event_id)
 
         return SalesDashboard(
             paid_orders=paid_orders,
-            sold_tickets=sold_tickets or 0,
+            sold_tickets=sold_tickets,
             revenue=revenue,
             average_order=revenue // paid_orders if paid_orders else 0,
         )
 
     async def _load_occupancy(self, event_id: int) -> OccupancyDashboard:
         now = datetime.now(UTC)
-        reserved_active = and_(
-            EventSeat.status == SeatStatus.reserved,
-            EventSeat.reserved_until > now,
-        )
 
         async with self._postgres.session() as session:
-            total, reserved, sold = (
-                await session.execute(
-                    select(
-                        func.count(),
-                        func.count().filter(reserved_active),
-                        func.count().filter(EventSeat.status == SeatStatus.sold),
-                    )
-                    .select_from(EventSeat)
-                    .where(EventSeat.event_id == event_id)
-                )
-            ).one()
+            total, reserved, sold = await EventSeatRepository(session).occupancy_counts(
+                event_id, now
+            )
 
         occupancy_percent = round((reserved + sold) / total * 100, 2) if total else 0.0
         return OccupancyDashboard(
