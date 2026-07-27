@@ -3,13 +3,14 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from app.db import postgres
+from app.infra.redis.caches import EventCache
 from app.services.checkout import CheckoutService
 from app.services.dashboard import DashboardService
 from app.services.events import EventService
 
 
-def get_event_service() -> EventService:
-    return EventService(postgres)
+def get_event_service(request: Request) -> EventService:
+    return EventService(postgres, EventCache(request.app.state.redis))
 
 
 EventServiceDep = Annotated[EventService, Depends(get_event_service)]

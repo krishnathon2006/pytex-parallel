@@ -54,9 +54,9 @@ async def list_events(service: EventServiceDep) -> list[EventRead]:
 
 
 @router.get("/events/{event_id}", tags=["events"])
-async def get_event(event_id: int) -> EventRead:
+async def get_event(event_id: int, service: EventServiceDep) -> EventRead:
     """Возвращает описание мероприятия."""
-    ...
+    return await service.get_event(event_id)
 
 
 @router.get("/events/{event_id}/seats", tags=["events"])

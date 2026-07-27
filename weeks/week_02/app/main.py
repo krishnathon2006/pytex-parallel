@@ -2,14 +2,17 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from redis.asyncio import Redis
 from starlette.responses import JSONResponse
 
+from app import config
 from app.add_event_data import add_event_data_to_db
 from app.db import postgres
 from app.exceptions import (
     AccessDeniedError,
     DuplicateSeatError,
     EventNotFoundError,
+    EventUnavailableError,
     PaymentUnavailableError,
     SeatsNotFoundError,
     SeatsUnavailableError,
@@ -22,6 +25,8 @@ from app.routes import router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await add_event_data_to_db()
+    app.state.redis = Redis.from_url(config.REDIS_URL, decode_responses=True)
+    await app.state.redis.ping()
     payment_client = PaymentClient()
     protection_client = ProtectionClient()
     app.state.payment_client = payment_client
@@ -32,6 +37,7 @@ async def lifespan(app: FastAPI):
         await payment_client.close_client()
         await protection_client.close_client()
         await postgres.close()
+        await app.state.redis.aclose()
 
 
 ERROR_RESPONSES: dict[type[Exception], tuple[int, str]] = {
@@ -47,6 +53,10 @@ ERROR_RESPONSES: dict[type[Exception], tuple[int, str]] = {
         "Payment service is unavailable",
     ),
     AccessDeniedError: (status.HTTP_403_FORBIDDEN, "Access denied"),
+    EventUnavailableError: (
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        "Event is temporarily unavailable",
+    ),
 }
 
 
