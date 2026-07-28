@@ -1,3 +1,4 @@
+import logging
 import random
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
@@ -9,8 +10,15 @@ from app import config
 from app.exceptions import EventUnavailableError
 from app.schemas import EventRead
 
+logger = logging.getLogger(__name__)
+
 
 class EventCache:
+    """Кэш мероприятия в Redis с защитой от одновременной загрузки.
+
+    Наружу торчит только get_or_load — так в кэш нельзя записать в обход лока.
+    """
+
     _NOT_FOUND_IN_DB = "null"
 
     def __init__(self, redis: Redis):
@@ -21,12 +29,24 @@ class EventCache:
     async def get_or_load(
         self, event_id: int, load_func: Callable[[], Awaitable[EventRead | None]]
     ) -> EventRead | None:
+        """Отдает мероприятие из кэша, иначе загружает его через load_func.
+
+        В БД идет только тот, кто взял лок; остальные ждут его освобождения и
+        перечитывают кэш, а не дождавшиеся получают EventUnavailableError.
+        None значит «мероприятия нет в БД» и тоже кэшируется — иначе запросы
+        по несуществующим id проходят мимо кэша прямо в Postgres.
+        """
         found, value_from_cache = await self._get_cached(event_id)
         if found:
             return value_from_cache
 
         async with self._try_lock(event_id) as acquired:
             if not acquired:
+                logger.warning(
+                    "Timed out after %ss waiting for the load lock on event %s",
+                    config.REDIS_EVENT_LOCK_WAIT_SECONDS,
+                    event_id,
+                )
                 raise EventUnavailableError
 
             found, value_from_cache = await self._get_cached(event_id)
@@ -45,7 +65,14 @@ class EventCache:
             return False, None
         if value == self._NOT_FOUND_IN_DB:
             return True, None
-        return True, EventRead.model_validate_json(value)
+        try:
+            return True, EventRead.model_validate_json(value)
+        except ValueError:
+            logger.warning(
+                "Corrupted cache payload for event %s, falling back to the database",
+                event_id,
+            )
+            return False, None
 
     async def _set(self, event_id: int, value: EventRead | None) -> None:
         if value is None:
@@ -72,6 +99,10 @@ class EventCache:
         lock = self._redis.lock(
             name=self._get_lock_key(event_id),
             timeout=config.REDIS_EVENT_LOCK_TTL_SECONDS,
+            # Интервал опроса лока. Через лок успевает пройти примерно
+            # blocking_timeout / sleep ожидающих: с дефолтными 0.1 с это ~10
+            # запросов на мероприятие, остальные получают 503. С 0.01 с
+            # потолок поднимается до ~1000 ценой более частых опросов Redis.
             sleep=0.01,
         )
         acquired = await lock.acquire(

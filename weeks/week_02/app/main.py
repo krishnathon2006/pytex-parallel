@@ -20,6 +20,7 @@ from app.exceptions import (
 from app.infra.clients.payment import PaymentClient
 from app.infra.clients.protection import ProtectionClient
 from app.routes import router
+from app.services.event_views import EventViewsConsolidator
 
 
 @asynccontextmanager
@@ -31,9 +32,13 @@ async def lifespan(app: FastAPI):
     protection_client = ProtectionClient()
     app.state.payment_client = payment_client
     app.state.protection_client = protection_client
+    app.state.view_consolidator = EventViewsConsolidator(postgres)
+    await app.state.view_consolidator.start()
+
     try:
         yield
     finally:
+        await app.state.view_consolidator.stop()
         await payment_client.close_client()
         await protection_client.close_client()
         await postgres.close()

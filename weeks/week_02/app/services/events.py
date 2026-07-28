@@ -1,12 +1,14 @@
 from app.exceptions import EventNotFoundError
 from app.infra.postgres.postgres import PostgresClient
 from app.infra.postgres.repositories.events import EventRepository
-from app.infra.redis.caches import EventCache
+from app.infra.redis.event_cache import EventCache
 from app.models import Event
 from app.schemas import EventRead
 
 
 class EventService:
+    """Мероприятия для клиента."""
+
     def __init__(self, postgres: PostgresClient, event_cache: EventCache) -> None:
         self._postgres = postgres
         self._event_cache = event_cache
@@ -21,6 +23,7 @@ class EventService:
             return EventRead.model_validate(event)
 
     async def get_event(self, event_id: int) -> EventRead:
+        """Возвращает мероприятие из кэша либо из БД."""
         value = await self._event_cache.get_or_load(
             event_id, lambda: self._load_from_db(event_id)
         )
@@ -31,5 +34,6 @@ class EventService:
         return value
 
     async def list_events(self) -> list[Event]:
+        """Возвращает список мероприятий, ближайшие первыми."""
         async with self._postgres.session() as session:
             return await EventRepository(session).list_ordered_by_start()
