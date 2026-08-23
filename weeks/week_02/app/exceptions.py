@@ -2,6 +2,10 @@ class EventNotFoundError(Exception):
     pass
 
 
+class EventUnavailableError(Exception):
+    pass
+
+
 class SeatsNotFoundError(Exception):
     pass
 

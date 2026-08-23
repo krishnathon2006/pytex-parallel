@@ -1,8 +1,13 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request
 
-from app.dependencies import CheckoutServiceDep, DashboardServiceDep, EventServiceDep
+from app.dependencies import (
+    CheckoutServiceDep,
+    DashboardServiceDep,
+    EventServiceDep,
+    EventViewsServiceDep,
+)
 from app.schemas import (
     BookingCreate,
     CheckoutBooking,
@@ -54,9 +59,18 @@ async def list_events(service: EventServiceDep) -> list[EventRead]:
 
 
 @router.get("/events/{event_id}", tags=["events"])
-async def get_event(event_id: int) -> EventRead:
+async def get_event(
+    event_id: int,
+    request: Request,
+    event_service: EventServiceDep,
+    views: EventViewsServiceDep,
+) -> EventRead:
     """Возвращает описание мероприятия."""
-    ...
+    event = await event_service.get_event(event_id)
+    if request.client is not None:
+        await views.record(event_id, request.client.host)
+
+    return event
 
 
 @router.get("/events/{event_id}/seats", tags=["events"])
